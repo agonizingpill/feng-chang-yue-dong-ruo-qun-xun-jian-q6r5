@@ -100,3 +100,15 @@ Seed增加FD-202611-A可用30kg、FD-HOLD隔离8kg、FD-EXPIRED已过期5kg，�
 GET /moves /insulation-lots /insulation-installs /spring-reviews供三角色；POST /moves、complete/cancel、POST /insulation-lots、POST /insulation-installs、PUT ventilation、POST remove及POST /spring-reviews允许蜂师/主管；move approve、insulation accept、spring pass及物料隔离仅主管，viewer全部只读。各新增模型均有外键；物料数量与春检值域由数据库和Pydantic校验。
 
 Seed只在缺失时增加IN-2026-WINTER 120件，不改人工库存/安装/春检；历史winter_ready无需补装以维持历史状态，新的春检动作才要求保温。真实证据在test-artifacts/gb-1027/v3/。本地检疫留痕不替代行政检疫证；每箱每季一条春检，本演示固定2026越冬季，无跨季归档。
+
+
+## 批量饲喂安排
+
+逐箱领料容易先占给低风险群，批量安排让异常分值低的群先领到料，共十业务页。
+
+- **预览**：`POST /feed-batches/preview`提交每箱用量（0–3kg，同箱不重复）。只纳入最新筛查已完成（screened且有分值）、有王且无未结处置（planned/executed/rechecked/needs_requeen）的蜂箱，按原异常分值从低到高、同分按箱号排序；按有效期近的合格批次（active且未过期）依次领料，单箱可跨批。响应列出能安排（含逐批分配）、缺料箱（含缺口）与被排除箱及原因，并给出覆盖箱况/巡检/处置/批次/领料的状态指纹。
+- **确认**：`POST /feed-batches`携带预览指纹与客户端token。事务先锁全部巡检/蜂箱/批次再校指纹，巡检、处置或库存已变则整批拒绝并要求重算；成功时逐箱生成planned饲喂计划与跨批FeedBatchIssue领料行，同一事务生效。token唯一约束保证幂等：未收到回执可原样重试，不新增计划也不再扣料，仍回到原批；两人并发确认由行锁串行，后到者指纹失效被拒，不超领不重复安排。
+- **取消退料**：`POST /feed-batches/{id}/cancel`取消全部未执行项，按领料行退回各来源批次；已执行项不退。原`POST /care/{id}/cancel`对批量计划同样退回各行，旧单退料流程不变。批量计划执行仍走处置簿，`execution_guard`逐行核验批次有效后将领料行置used；批量计划不能再走单箱领料重复扣料。
+- **页面**：`pages/batch.js`从用量设置到预览、确认，再查看每箱依据（异常分值、巡检号、用量）与领退结果（批次、重量、领/用/退状态）。接口`GET /feed-batches`供三角色查看台账；预览/确认/取消限蜂师与主管。
+
+新表FeedBatch/FeedBatchItem/FeedBatchIssue由metadata补建，无旧表列变更；Item存异常分值快照与唯一care_id，Issue行可跨批对应一个计划。真实证据在test-artifacts/batch-test/。
